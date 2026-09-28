@@ -1,7 +1,13 @@
 """Rectas y planos en R³ · visualizador interactivo (Streamlit + Plotly)."""
+import json
+import pathlib
+import tempfile
+
 import numpy as np
 import plotly.graph_objects as go
 import streamlit as st
+import streamlit.components.v1 as components
+from plotly.offline import get_plotlyjs
 
 try:  # opcional: permite graficar mientras se escribe (tecla a tecla)
     from st_keyup import st_keyup
@@ -28,6 +34,43 @@ footer,#MainMenu{{visibility:hidden}}
 </style>""",
     unsafe_allow_html=True,
 )
+
+
+# ───────────────────── visor R³ persistente (no se reinicia) ─────────────────────
+# Un componente propio mantiene el gráfico montado entre ejecuciones: cada cambio
+# llega como datos nuevos y Plotly.react actualiza en el sitio, conservando la cámara.
+_VIEW_HTML = """<!doctype html><html><head><meta charset="utf-8">
+<style>html,body{margin:0;background:#12141c;overflow:hidden}#g{width:100%}</style>
+<script src="plotly.min.js"></script></head><body><div id="g"></div><script>
+const send=(t,d)=>window.parent.postMessage(Object.assign({isStreamlitMessage:true,type:t},d),"*");
+const gd=document.getElementById("g");
+let cam=null,bound=false;
+window.addEventListener("message",e=>{
+  if(!e.data||e.data.type!=="streamlit:render")return;
+  const a=e.data.args,fig=a.figure;
+  gd.style.height=a.height+"px";
+  if(cam)fig.layout.scene.camera=cam;
+  Plotly.react(gd,fig.data,fig.layout,{displaylogo:false,responsive:true}).then(()=>{
+    if(!bound){bound=true;
+      gd.on("plotly_relayout",ev=>{if(ev["scene.camera"])cam=ev["scene.camera"];});}
+    send("streamlit:setFrameHeight",{height:a.height});
+  });
+});
+send("streamlit:componentReady",{apiVersion:1});
+send("streamlit:setFrameHeight",{height:680});
+</script></body></html>"""
+
+
+@st.cache_resource
+def _viewer():
+    d = pathlib.Path(tempfile.gettempdir()) / "r3_viewer_v1"
+    d.mkdir(exist_ok=True)
+    js = d / "plotly.min.js"
+    if not js.exists():
+        js.write_text(get_plotlyjs(), encoding="utf-8")
+    (d / "index.html").write_text(_VIEW_HTML, encoding="utf-8")
+    return components.declare_component("r3_viewer", path=str(d))
+
 
 ss = st.session_state
 if "objs" not in ss:
@@ -419,5 +462,5 @@ with st.sidebar:
             h3.button("✕", key=f"del_{o['id']}", on_click=remove, args=(o["id"],), help="Eliminar")
             RENDER[o["kind"]](o, fig if vis else go.Figure(), L, color)
 
-st.plotly_chart(fig, theme=None, key="r3", config={"displaylogo": False})
+_viewer()(figure=json.loads(fig.to_json()), height=680, key="r3")
 st.caption("Arrastra para rotar · rueda o pellizco para acercar · las flechas amarillas son vectores normales.")
