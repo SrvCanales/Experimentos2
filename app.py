@@ -159,20 +159,39 @@ def plane_polygon(n, d, L):
 
 
 def base_fig(L):
+    """Ejes que cruzan en el origen, planos coordenados tenues: se ven los 8 octantes."""
     dt = 1 if L <= 8 else 2 if L <= 16 else 5
-    ax = lambda t: dict(
-        range=[-L, L], dtick=dt, showbackground=True, backgroundcolor=DEEP, gridcolor=LINE,
-        zerolinecolor=MUTED, zerolinewidth=3, linecolor=LINE, tickfont=dict(color=MUTED, size=10),
-        title=dict(text=t, font=dict(color=TEXT, size=15)),
-    )
+    ticks = [c for c in np.arange(-L, L + 1e-9, dt) if abs(c) > 1e-9]
     fig = go.Figure()
+    for k in range(3):  # cuadrícula tenue en cada plano coordenado
+        i, j = [m for m in range(3) if m != k]
+        rows = []
+        for c in np.arange(-L, L + 1e-9, dt):
+            for s0, s1 in ((i, j), (j, i)):
+                p, q = np.zeros(3), np.zeros(3)
+                p[s0] = q[s0] = c
+                p[s1], q[s1] = -L, L
+                rows += [p, q, [np.nan] * 3]
+        R = np.array(rows)
+        fig.add_trace(go.Scatter3d(x=R[:, 0], y=R[:, 1], z=R[:, 2], mode="lines",
+                                   line=dict(color=LINE, width=1), hoverinfo="skip"))
+    for k, name in enumerate("xyz"):  # ejes completos (negativos y positivos)
+        e = np.zeros(3)
+        e[k] = 1
+        add_arrow(fig, -L * e, 2 * L * e, MUTED, L, width=3)
+        P = np.outer(ticks, e)
+        fig.add_trace(go.Scatter3d(x=P[:, 0], y=P[:, 1], z=P[:, 2], mode="text",
+                                   text=[f"{c:g}" for c in ticks], textposition="top center",
+                                   textfont=dict(color=MUTED, size=9), hoverinfo="skip"))
+        E = 1.1 * L * e
+        fig.add_trace(go.Scatter3d(x=[E[0]], y=[E[1]], z=[E[2]], mode="text", text=[name],
+                                   textfont=dict(color=TEXT, size=15), hoverinfo="skip"))
+    hid = dict(visible=False, range=[-1.15 * L, 1.15 * L])
     fig.update_layout(
         paper_bgcolor=BG, margin=dict(l=0, r=0, t=0, b=0), height=680, showlegend=False,
-        uirevision=f"L{L}",
-        scene=dict(
-            xaxis=ax("x"), yaxis=ax("y"), zaxis=ax("z"), aspectmode="cube", bgcolor=BG,
-            uirevision="camara", camera=dict(eye=dict(x=1.5, y=1.5, z=0.9)),
-        ),
+        uirevision="r3",
+        scene=dict(xaxis=hid, yaxis=hid, zaxis=hid, aspectmode="cube", bgcolor=BG,
+                   uirevision="r3", camera=dict(eye=dict(x=1.5, y=1.5, z=0.9))),
     )
     return fig
 
@@ -380,6 +399,8 @@ with st.sidebar:
     for c, kind in zip(cols, ("punto", "recta", "plano")):
         with c:
             st.button(f"+ {NAMES[kind]}", key=f"add_{kind}", on_click=add, args=(kind,))
+    if st_keyup is None:
+        st.caption("Tip: instala `streamlit-keyup` para graficar mientras escribes (sin Enter).")
     L = st.slider("Alcance de los ejes (±)", 3, 20, 6)
     fig = base_fig(L)
     if not ss.objs:
@@ -387,13 +408,16 @@ with st.sidebar:
     for o in list(ss.objs):
         color = COLORS[(o["id"] - 1) % 4]
         with st.container(border=True):
-            h1, h2 = st.columns([5, 1])
+            h1, h2, h3 = st.columns([5, 1, 1])
+            vis = h2.toggle("Visible", value=True, key=f"vis_{o['id']}", label_visibility="collapsed",
+                            help="Mostrar u ocultar en R³")
             h1.markdown(
-                f'<div class="cab"><span class="dot" style="background:{color}"></span>{NAMES[o["kind"]]} {o["n"]}</div>',
+                f'<div class="cab"><span class="dot" style="background:{color};opacity:{1 if vis else .3}"></span>'
+                f'{NAMES[o["kind"]]} {o["n"]}</div>',
                 unsafe_allow_html=True,
             )
-            h2.button("✕", key=f"del_{o['id']}", on_click=remove, args=(o["id"],), help="Eliminar")
-            RENDER[o["kind"]](o, fig, L, color)
+            h3.button("✕", key=f"del_{o['id']}", on_click=remove, args=(o["id"],), help="Eliminar")
+            RENDER[o["kind"]](o, fig if vis else go.Figure(), L, color)
 
-st.plotly_chart(fig, theme=None, config={"displaylogo": False})
+st.plotly_chart(fig, theme=None, key="r3", config={"displaylogo": False})
 st.caption("Arrastra para rotar · rueda o pellizco para acercar · las flechas amarillas son vectores normales.")
